@@ -1,0 +1,37 @@
+{
+  "optimal_conditions": {
+    "thermal_state": 0.35,
+    "battery_level": 1.0,
+    "rate": "10mbit",
+    "delay": "20ms",
+    "loss": "0.1%"
+  },
+  "high_network_activity": {
+    "thermal_state": 0.45,
+    "battery_level": 0.85,
+    "rate": "2mbit",
+    "delay": "120ms",
+    "loss": "1%"
+  },
+  "thermal_throttling_start": {
+    "thermal_state": 0.88,
+    "battery_level": 0.70,
+    "rate": "8mbit",
+    "delay": "40ms",
+    "loss": "0.1%"
+  },
+  "low_battery_powersave": {
+    "thermal_state": 0.40,
+    "battery_level": 0.15,
+    "rate": "5mbit",
+    "delay": "50ms",
+    "loss": "0.1%"
+  },
+  "critical_system_stress": {
+    "thermal_state": 0.95,
+    "battery_level": 0.10,
+    "rate": "0.5mbit",
+    "delay": "250ms",
+    "loss": "3%"
+  }
+}
