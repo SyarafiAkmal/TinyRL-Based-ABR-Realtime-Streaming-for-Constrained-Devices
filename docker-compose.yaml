@@ -1,14 +1,14 @@
 services:
-  cloud-node:
-    build:
-      context: ./src/cloud-node
-      dockerfile: Dockerfile
-    container_name: cloud_node_container
-    cap_add:
-      - NET_ADMIN
-    networks:
-      - abr_net
-    restart: always
+  # cloud-node:
+  #   build:
+  #     context: ./src/cloud-node
+  #     dockerfile: Dockerfile
+  #   container_name: cloud_node_container
+  #   cap_add:
+  #     - NET_ADMIN
+  #   networks:
+  #     - abr_net
+  #   restart: always
 
   edge-node:
     build:
@@ -22,10 +22,10 @@ services:
         limits:
           cpus: '0.05'
           memory: 32M
-    networks:
-      - abr_net
-    depends_on:
-      - cloud-node
+    # networks:
+    #   - abr_net
+    # depends_on:
+    #   - cloud-node
     restart: always
 
 networks:
