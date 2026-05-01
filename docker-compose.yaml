@@ -20,8 +20,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.05'
-          memory: 32M
+          cpus: '0.25'
+          memory: 256M
     # networks:
     #   - abr_net
     # depends_on:
