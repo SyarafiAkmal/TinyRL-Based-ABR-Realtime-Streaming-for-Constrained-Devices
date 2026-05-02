@@ -15,7 +15,7 @@ class HW_Net_API:
         """
         Args:
             shared_status_path: Path to JSON file with simulated HW states
-                                 (thermal_state, battery_level, etc.)
+                                 (temp_celsius, battery_level, etc.)
             state:               Active state key in the metrics JSON
                                  (e.g. "normal", "low_battery", "throttled")
             target_node:         Hostname or IP of the streaming/CDN node
@@ -36,12 +36,16 @@ class HW_Net_API:
 
         self.target_node = target_node
 
+        # Network probe state
+        self._throughput_window: deque = deque(maxlen=2)
+        self._last_fetch_time_s: float = 0.0
+
     # =========================================================================
     # Public API
     # =========================================================================
 
     def refresh_state(self):
-        """Reload the shared metrics JSON to get updated simulated values."""
+        """Reload the shared metrics JSON to get updated simulated values from the orchestrator."""
         with open("/app/shared/status.json", "r") as f:
             try:
                 self.status = json.load(f)
@@ -54,6 +58,10 @@ class HW_Net_API:
                     "loss": "0.1%"
                 }
 
+    # =========================================================================
+    # Hardware API
+    # =========================================================================
+
     def get_hw_state(self) -> dict:
         """
         Returns real container CPU/memory alongside simulated
@@ -63,7 +71,7 @@ class HW_Net_API:
             {
                 "cpu_pressure":  float   # % (0-100)
                 "memory_pressure":  float   # % (0-100)
-                "thermal_state":    str     # severity scale (0.0-1.0) scaled on 20-100°C
+                "thermal_state":    float   # severity scale (0.0-1.0) scaled on 20-100°C
                 "battery_level":    float   # % (0.0-1.0)
             }
         """
@@ -134,6 +142,72 @@ class HW_Net_API:
         
         return (usage / limit) * 100 if limit > 0 else 0.0
 
+    # =========================================================================
+    # Network API
+    # =========================================================================
+
+    def get_net_state(self) -> dict:
+        """Return current network probe conditions as seen from edge node to target_node.
+        
+        Returns:
+            {
+                "segment_fetch_time": float   # e.g. "50ms"
+                "estimated_throughput":  float   # e.g. "0.1%"
+            }
+        """
+        self.refresh_state()
+        pass
+
+    def get_net_state(self) -> dict:
+        """Probe target_node and return current network observation.
+        
+        Returns:
+            {
+                "segment_fetch_time":   float   # seconds for last probe
+                "estimated_throughput": float   # Mbps (smoothed over last 5 probes)
+            }
+        
+        Note: Each call triggers an HTTP probe (~tens of ms to seconds depending
+        on network shaping). Prefer calling sparsely.
+        """
+        fetch_time, throughput = self._probe_network()
+        return {
+            "segment_fetch_time":   fetch_time,
+            "estimated_throughput": throughput,
+        }
+    
+    def _probe_network(self) -> tuple[float, float]:
+        """HTTP probe to target_node/probe endpoint.
+        
+        Returns:
+            (fetch_time_s, throughput_mbps)
+            Returns (0.0, 0.0) on failure.
+        """
+        url = f"http://{self.target_node}/probe"
+        try:
+            t_start = time.perf_counter()
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                data = resp.read()
+            elapsed_s = time.perf_counter() - t_start
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            return 0.0, 0.0
+
+        if elapsed_s <= 0:
+            return 0.0, 0.0
+
+        size_bits = len(data) * 8
+        throughput_mbps = (size_bits / 1e6) / elapsed_s
+
+        self._last_fetch_time_s = elapsed_s
+        self._throughput_window.append(throughput_mbps)
+        return elapsed_s, self._smoothed_throughput()
+
+    def _smoothed_throughput(self) -> float:
+        """Sliding-window average throughput (Mbps) over last 5 probes."""
+        if not self._throughput_window:
+            return 0.0
+        return sum(self._throughput_window) / len(self._throughput_window)
+
 
 def cpu_burn(api: HW_Net_API, duration_s: float = 1.0) -> dict:
     """Dummy workload yang represent inference + compression cycle.
@@ -172,19 +246,22 @@ def cpu_burn(api: HW_Net_API, duration_s: float = 1.0) -> dict:
 if __name__ == "__main__":
     api = HW_Net_API(
         shared_status_path="/app/shared/status.json",
-        target_node="cloud_node_container",
+        target_node="cloud_node_container:8000",  # ← include port
     )
     print("[edge-node] HW_Net_API ready", flush=True)
 
     while True:
         burn = cpu_burn(api, duration_s=1.0)
         hw   = api.get_hw_state()
-        
+        net  = api.get_net_state()   # ← probe HTTP ke cloud-node
+
         print(
             f"ops={burn['ops']/1e6:.2f}M  "
             f"cpu_avg={burn['cpu_avg_pressure']:5.1f}%  "
             f"mem_avg={burn['mem_avg_pressure']:5.1f}%  "
-            f"| thermal={hw['thermal_state']} bat={hw['battery_level']}",
+            f"| thermal={hw['thermal_state']} bat={hw['battery_level']}  "
+            f"| fetch={net['segment_fetch_time']*1000:6.1f}ms "
+            f"thr={net['estimated_throughput']:5.2f}Mbps",
             flush=True,
         )
         time.sleep(2)

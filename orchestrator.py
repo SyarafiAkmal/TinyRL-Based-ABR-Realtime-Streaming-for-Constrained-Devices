@@ -49,9 +49,33 @@ def apply_hardware_limit(sc: dict):
         print(f"  ❌ Failed to update container CPU quota: {e}")
 
 
-def apply_network_conditions():
+def apply_network_conditions(sc: dict):
     """Apply tc netem qdisc on cloud_node's eth0 egress."""
-    pass
+
+    rate  = sc.get("rate",  "10mbit")
+    delay = sc.get("delay", "0ms")
+    loss  = sc.get("loss",  "0%").rstrip("%") 
+
+    subprocess.run(
+        ["docker", "exec", CLOUD_CONTAINER,
+         "tc", "qdisc", "del", "dev", "eth0", "root"],
+        stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    )
+
+    cmd = [
+        "docker", "exec", CLOUD_CONTAINER,
+        "tc", "qdisc", "add", "dev", "eth0", "root", "netem",
+        "rate",  rate,
+        "delay", delay,
+        "loss",  loss,
+    ]
+
+    print(f"  Applying tc netem: rate={rate} delay={delay} loss={loss}%")
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except:
+        print(f"  ❌ Failed to apply network conditions: {cmd}")
 
 with open(SCENARIOS_PATH, 'r') as f:
     scenarios = json.load(f)
@@ -65,8 +89,8 @@ for i, sc in enumerate(scenarios):
     apply_hardware_limit(scenarios[sc])
 
     # Apply network conditions based on current state
-    # print(f"[Scenario {sc}] Applying network conditions...")
-    # apply_network_conditions()
+    print(f"[Scenario {sc}] Applying network conditions...")
+    apply_network_conditions(scenarios[sc])
 
     time.sleep(SCENARIO_DURATION)
     print(f"[Scenario {sc}] Done.")
