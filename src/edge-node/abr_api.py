@@ -37,6 +37,9 @@ class ABR_API:
     def __init__(self, model_path: str, hw_net_api: HW_Net_API):
         self.model_path = model_path
         self.hw_net_api = hw_net_api
+        self.last_bitrate_kbps = 0.0
+
+        self._load_agent(model_path)
 
     def get_next_bitrate(self, segment_index: int, buffer_level_s: float) -> BitrateDecision:
         """
@@ -49,10 +52,32 @@ class ABR_API:
         Returns:
             BitrateDecision with chosen bitrate and confidence.
         """
-        abr_state = self.preprocess_state(self.fetch_abr_state(buffer_level_s=buffer_level_s, segment_index=segment_index))
-        action_decision = self._run_inference(abr_state)
-        decision : BitrateDecision = self._action_to_decision(action_index=action_decision[0], confidence=action_decision[1])
-        self.last_bitrate_kbps = decision.bitrate_kbps
+        abr_state = self.fetch_abr_state()
+
+        feature_vector = self.preprocess_state(
+            abr_state
+        )
+
+        action_idx, confidence = (
+            self._run_inference(
+                feature_vector
+            )
+        )
+
+        decision = self._action_to_decision(
+            action_idx,
+            confidence
+        )
+
+        self.last_bitrate_kbps = (
+            decision.bitrate_kbps
+        )
+
+        # expose history to HW_Net_API
+        self.hw_net_api.set_previous_bitrate(
+            decision.bitrate_kbps
+        )
+
         return decision
 
 
@@ -74,54 +99,71 @@ class ABR_API:
         """
         pass
 
-    def fetch_abr_state(self, buffer_level_s: float, segment_index: int) -> ABRState:
+    def fetch_abr_state(self) -> ABRState:
         """
-        Combine HW + network observations with player context into ABRState.
-
-        Args:
-            hw:             Latest hardware snapshot.
-            net:            Latest network probe result.
-            buffer_level_s: Current buffer depth.
-            segment_index:  Segment about to be fetched.
+        Combine HW + network observation
+        into a single RL state.
         """
-        net_state = self.hw_net_api.get_net_state()
-        hw_state = self.hw_net_api.get_hw_state()
+        net = self.hw_net_api.get_net_state()
+        hw = self.hw_net_api.get_hw_state()
 
         return ABRState(
             hw=HWState(
-                cpu_pressure=hw_state["cpu_pressure"],
-                memory_pressure=hw_state["memory_pressure"],
-                thermal_state=hw_state["thermal_state"],
-                battery_level=hw_state["battery_level"]
+                cpu_pressure=hw["cpu_pressure"],
+                memory_pressure=hw[
+                    "memory_pressure"
+                ],
+                thermal_state=hw[
+                    "thermal_state"
+                ],
+                battery_level=hw[
+                    "battery_level"
+                ],
             ),
             net=NetState(
-                segment_fetch_time=net_state["segment_fetch_time"],
-                estimated_throughput=net_state["estimated_throughput"]
+                estimated_throughput=net[
+                    "estimated_throughput"
+                ],
+                packet_loss_rate=net[
+                    "packet_loss_rate"
+                ],
+                rtt_ms=net["rtt_ms"],
+                previous_bitrate_kbps=net[
+                    "previous_bitrate_kbps"
+                ],
             ),
-            last_bitrate_kbps=self.last_bitrate_kbps,
-            buffer_level_s=buffer_level_s,
-            segment_index=segment_index
         )
 
-    def preprocess_state(self, state: ABRState) -> list[float]:
+    def preprocess_state(
+        self,
+        state: ABRState
+    ) -> list[float]:
         """
-        Normalize and flatten ABRState into the fixed-length feature vector
-        expected by the tinyRL agent.
-
-        Normalizations applied:
-            cpu_pressure      → / 100
-            memory_pressure   → / 100
-            thermal_state     → (°C − TEMP_MIN) / (TEMP_MAX − TEMP_MIN)
-            battery_level     → already 0–1, pass through
-            segment_fetch_time→ clip + normalize against expected max RTT
-            estimated_throughput → / BW_MAX_MBPS
-            last_bitrate_kbps → / max(BITRATE_LEVELS)
-            buffer_level_s    → clip + normalize against buffer target
-
-        Returns:
-            Flat list[float], length == agent input dimension.
+        Normalize + flatten state into
+        model input vector.
         """
-        pass
+
+        return [
+            # hardware
+            state.hw.cpu_pressure / 100.0,
+            state.hw.memory_pressure / 100.0,
+            self._normalize_thermal(
+                state.hw.thermal_state
+            ),
+            state.hw.battery_level,
+
+            # network
+            state.net.estimated_throughput
+            / self._BW_MAX_MBPS,
+
+            state.net.packet_loss_rate,
+
+            state.net.rtt_ms
+            / self._MAX_RTT_MS,
+
+            state.net.previous_bitrate_kbps
+            / self._MAX_BITRATE_KBPS,
+        ]
 
     def _normalize_thermal(self, temp_celsius: float) -> float:
         """
