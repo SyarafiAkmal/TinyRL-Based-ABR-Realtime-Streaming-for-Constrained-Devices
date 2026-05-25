@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 # Bitrate ladder (kbps)
 BITRATES_KBPS = [300, 750, 1200, 1850, 2850, 4300]
 SEGMENT_DURATION_S = 4
-PROBE_SIZE_BYTES = 100_000  # 100KB for throughput estimation
+PROBE_SIZE_BYTES = 100_000 # 100KB for throughput estimation
 
 
 def segment_size(bitrate_kbps: int) -> int:
@@ -28,6 +28,11 @@ def serve_bytes(handler: BaseHTTPRequestHandler, n_bytes: int):
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path
+
+        # /ping → 0-byte body, for RTT
+        if path == '/ping':
+            serve_bytes(self, 0)
+            return
 
         # /probe → 100KB throughput test
         if path == '/probe':

@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
+from hw_net_api import HW_Net_API
 
 @dataclass
 class HWState:
@@ -33,7 +34,7 @@ class ABR_API:
     """
     Bridges HW_Net_API → tinyRL ABR agent → bitrate decision.
     """
-    def __init__(self, model_path: str, hw_net_api):
+    def __init__(self, model_path: str, hw_net_api: HW_Net_API):
         self.model_path = model_path
         self.hw_net_api = hw_net_api
 
@@ -48,7 +49,12 @@ class ABR_API:
         Returns:
             BitrateDecision with chosen bitrate and confidence.
         """
-        pass
+        abr_state = self.preprocess_state(self.fetch_abr_state(buffer_level_s=buffer_level_s, segment_index=segment_index))
+        action_decision = self._run_inference(abr_state)
+        decision : BitrateDecision = self._action_to_decision(action_index=action_decision[0], confidence=action_decision[1])
+        self.last_bitrate_kbps = decision.bitrate_kbps
+        return decision
+
 
     def update(self, reward: float, new_buffer_level_s: float):
         """
@@ -68,21 +74,7 @@ class ABR_API:
         """
         pass
 
-    def fetch_hw_state(self) -> HWState:
-        """
-        Pull hardware metrics from HW_Net_API and wrap in HWState.
-        Thin adapter — no transformation yet.
-        """
-        pass
-
-    def fetch_net_state(self) -> NetState:
-        """
-        Trigger a network probe via HW_Net_API and wrap result in NetState.
-        Note: each call incurs real network I/O; call once per segment.
-        """
-        pass
-
-    def merge_state(self, hw: HWState, net: NetState, buffer_level_s: float, segment_index: int) -> ABRState:
+    def fetch_abr_state(self, buffer_level_s: float, segment_index: int) -> ABRState:
         """
         Combine HW + network observations with player context into ABRState.
 
@@ -92,7 +84,24 @@ class ABR_API:
             buffer_level_s: Current buffer depth.
             segment_index:  Segment about to be fetched.
         """
-        pass
+        net_state = self.hw_net_api.get_net_state()
+        hw_state = self.hw_net_api.get_hw_state()
+
+        return ABRState(
+            hw=HWState(
+                cpu_pressure=hw_state["cpu_pressure"],
+                memory_pressure=hw_state["memory_pressure"],
+                thermal_state=hw_state["thermal_state"],
+                battery_level=hw_state["battery_level"]
+            ),
+            net=NetState(
+                segment_fetch_time=net_state["segment_fetch_time"],
+                estimated_throughput=net_state["estimated_throughput"]
+            ),
+            last_bitrate_kbps=self.last_bitrate_kbps,
+            buffer_level_s=buffer_level_s,
+            segment_index=segment_index
+        )
 
     def preprocess_state(self, state: ABRState) -> list[float]:
         """

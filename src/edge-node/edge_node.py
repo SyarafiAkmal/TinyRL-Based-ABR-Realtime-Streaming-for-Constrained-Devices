@@ -46,18 +46,24 @@ if __name__ == "__main__":
     print("[edge-node] HW_Net_API ready", flush=True)
 
     while True:
+        print("[loop] burn start", flush=True)
         burn = cpu_burn(api, duration_s=1.0)
+        print("[loop] burn done, probing net", flush=True)
         hw   = api.get_hw_state()
-        net  = api.get_net_state()   # ← probe HTTP ke cloud-node
+        net  = api.get_net_state()
+        print("[loop] probe done", flush=True)
+        print(f"ops={burn['ops']/1e6:.2f}M ...", flush=True)
 
         print(
             f"ops={burn['ops']/1e6:.2f}M  "
             f"cpu_avg={burn['cpu_avg_pressure']:5.1f}%  "
             f"mem_avg={burn['mem_avg_pressure']:5.1f}%  "
             f"| thermal={hw['thermal_state']} bat={hw['battery_level']}  "
-            f"| fetch={net['segment_fetch_time']*1000:6.1f}ms "
-            f"thr={net['estimated_throughput']:5.2f}Mbps",
+            f"| rtt={net['rtt_ms']:6.1f}ms "
+            f"thr={net['estimated_throughput']:5.2f}Mbps "
+            f"loss={net['packet_loss_rate']*100:4.1f}% "
+            f"prev_br={net['previous_bitrate_kbps']:7.1f}kbps",
             flush=True,
         )
-        time.sleep(2)
+        # time.sleep(2)
 
