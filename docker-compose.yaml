@@ -1,4 +1,13 @@
 services:
+  signaling-server:
+    build:
+      context: ./src/signaling-server
+      dockerfile: Dockerfile
+    container_name: signaling_server
+    networks:
+      - abr_net
+    restart: always
+
   cloud-node:
     build:
       context: ./src/cloud-node
@@ -6,8 +15,12 @@ services:
     container_name: cloud_node_container
     cap_add:
       - NET_ADMIN
+    volumes:
+      - ./src/shared:/app/shared
     networks:
       - abr_net
+    depends_on:
+      - signaling-server
     restart: always
 
   edge-node:
@@ -16,7 +29,9 @@ services:
       dockerfile: Dockerfile
     container_name: edge_node_container
     volumes:
-      - ./src/shared:/app/shared
+      - ./src/shared:/app/shared        # HW status + webrtc stats
+      - ./src/video:/app/video          # video files to stream
+      - ./src/model:/app/model          # persisted .npz weights
     deploy:
       resources:
         limits:
@@ -26,6 +41,7 @@ services:
       - abr_net
     depends_on:
       - cloud-node
+      - signaling-server
     restart: always
 
 networks:

@@ -1,21 +1,31 @@
 FROM python:3.9-slim
 
-# Install procps supaya psutil bisa akses sistem proses
+# procps for cgroup CPU sampling, build tools for av/aiortc C extensions
 RUN apt-get update && apt-get install -y \
     procps \
+    gcc \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libssl-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install library wajib untuk monitor & math
-RUN pip install --no-cache-dir psutil numpy
+RUN pip install --no-cache-dir \
+    psutil \
+    numpy \
+    aiohttp \
+    aiortc \
+    av
 
-# Buat folder shared untuk komunikasi dengan Host
-RUN mkdir -p /app/shared
+# Shared folder untuk komunikasi dengan host/orchestrator
+RUN mkdir -p /app/shared /app/video /app/model
 
-# Copy semua file .py yang ada di folder edge-node ke dalam container
-# Ini lebih aman daripada copy satu-satu kalau filenya nambah
 COPY *.py .
 
-# Jalankan script utama kamu
-CMD ["python", "edge_node.py"]
+CMD ["python", "edge_node.py", "--video", "/app/video/input.mp4"]
